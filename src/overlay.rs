@@ -234,7 +234,7 @@ fn layer_window(
     window
 }
 
-/// Draws the bar's caps, dropping the oldest while they are wider than the monitor.
+/// Draws the bar's caps, dropping the oldest while they are wider than 60% of the monitor's width.
 fn redraw(window: &gtk4::Window, row: &gtk4::Box, bar: &mut Bar, max_width: i32) {
     show_caps(row, bar.caps());
     while bar.caps().len() > 1 && natural_width(row) > max_width {
