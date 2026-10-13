@@ -35,6 +35,10 @@ struct HeldKey {
     key: KeyId,
     cap: Option<CapId>,
     is_shift: bool,
+    /// Held but not shown: pressed while the session was locked, or on the bar when it
+    /// was cleared. It is known as held so a release or a keyboard going away reaches
+    /// the key map, but it draws nothing and does not keep the bar from clearing.
+    hidden: bool,
 }
 
 #[derive(Default)]
@@ -59,7 +63,22 @@ impl Bar {
             KeyKind::Typed(label) => (Some(self.push_cap(label, held)), false),
             KeyKind::Shortcut(label) => (Some(self.press_shortcut(label, held)), false),
         };
-        self.held_keys.push(HeldKey { key, cap, is_shift });
+        self.held_keys.push(HeldKey {
+            key,
+            cap,
+            is_shift,
+            hidden: false,
+        });
+    }
+
+    /// Records a key going down without a cap, for a press while the session is locked.
+    pub fn press_hidden(&mut self, key: KeyId, press: Press) {
+        self.held_keys.push(HeldKey {
+            key,
+            cap: None,
+            is_shift: press.kind == KeyKind::Modifier(Modifier::Shift),
+            hidden: true,
+        });
     }
 
     pub fn release(&mut self, key: KeyId, now: Instant) {
@@ -80,16 +99,19 @@ impl Bar {
         let is_idle = self
             .last_activity
             .is_some_and(|pressed| now.duration_since(pressed) >= IDLE_LIMIT);
-        if is_idle && self.held_keys.is_empty() {
+        if is_idle && self.held_keys.iter().all(|held_key| held_key.hidden) {
             self.caps.clear();
             self.last_activity = None;
         }
     }
 
-    /// Forgets everything: no caps, no held keys, no Shift cap.
+    /// Removes every cap. Keys still held stay known as held, with no cap.
     pub fn clear(&mut self) {
         self.caps.clear();
-        self.held_keys.clear();
+        for held_key in &mut self.held_keys {
+            held_key.cap = None;
+            held_key.hidden = true;
+        }
         self.shift_cap = None;
         self.last_activity = None;
     }
@@ -406,6 +428,42 @@ mod tests {
         bar.press(key(2), shortcut("Enter", shift()), now);
         bar.keyboard_gone(KB, now);
         assert!(bar.caps().iter().all(|cap| !cap.lit));
+    }
+
+    #[test]
+    fn a_key_held_without_a_cap_draws_nothing_and_does_not_block_the_idle_clear() {
+        let mut bar = Bar::default();
+        let start = Instant::now();
+        bar.press_hidden(key(1), modifier(Modifier::Shift, none()));
+        assert!(bar.caps().is_empty());
+        bar.press(key(2), typed("a", none()), start);
+        bar.release(key(2), start);
+        bar.clear_if_idle(start + Duration::from_secs(2));
+        assert!(bar.caps().is_empty());
+    }
+
+    #[test]
+    fn clearing_keeps_what_is_held_and_its_release_returns_the_code() {
+        let mut bar = Bar::default();
+        let now = Instant::now();
+        bar.press(key(1), modifier(Modifier::Ctrl, none()), now);
+        bar.clear();
+        assert!(bar.caps().is_empty());
+        assert_eq!(bar.keyboard_gone(KB, now), [1]);
+    }
+
+    #[test]
+    fn shift_held_through_a_clear_keeps_the_shift_cap_lit_until_it_is_let_go() {
+        let mut bar = Bar::default();
+        let now = Instant::now();
+        bar.press(key(1), modifier(Modifier::Shift, none()), now);
+        bar.clear();
+        bar.press(key(2), modifier(Modifier::Shift, none()), now);
+        bar.press(key(3), shortcut("Enter", shift()), now);
+        bar.release(key(2), now);
+        assert!(bar.caps()[0].lit);
+        bar.release(key(1), now);
+        assert!(!bar.caps()[0].lit);
     }
 
     #[test]

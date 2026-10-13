@@ -54,9 +54,10 @@ window.tactile {
 "#;
 
 /// Applies one input event to the key map and the bar. Every key-up reaches the key
-/// map, including keys the bar ignores, or its modifier state goes stale. A key-down
+/// map, including keys the bar ignores, or its modifier state goes stale. A key event
 /// while `is_locked()` still reaches the key map, so a held modifier stays held, but
-/// the bar is emptied and shows nothing. Only key-downs ask.
+/// the bar is emptied and shows nothing; a key going down then is recorded as held
+/// without a cap. Key-downs and key-ups ask; a keyboard going away does not.
 fn apply_event(
     keymap: &mut Keymap,
     bar: &mut Bar,
@@ -69,6 +70,7 @@ fn apply_event(
             let press = keymap.press(key.code);
             if is_locked() {
                 bar.clear();
+                bar.press_hidden(key, press);
             } else {
                 bar.press(key, press, now);
             }
@@ -76,6 +78,9 @@ fn apply_event(
         InputEvent::Up(key) => {
             keymap.release(key.code);
             bar.release(key, now);
+            if is_locked() {
+                bar.clear();
+            }
         }
         InputEvent::Gone(keyboard) => {
             for code in bar.keyboard_gone(keyboard, now) {
@@ -299,6 +304,7 @@ mod tests {
 
     const KEY_LEFTCTRL: u32 = 29;
     const KEY_A: u32 = 30;
+    const KEY_B: u32 = 48;
 
     #[test]
     fn unfound_monitor_is_bounded_by_the_first_monitor() {
@@ -383,6 +389,39 @@ mod tests {
         unlocked(&mut keymap, &mut bar, InputEvent::Up(key(KEY_LEFTCTRL)));
         unlocked(&mut keymap, &mut bar, InputEvent::Down(key(KEY_A)));
         assert_eq!(labels(&bar), ["a"]);
+    }
+
+    #[test]
+    fn ctrl_held_through_a_lock_is_released_when_its_keyboard_goes_away() {
+        let mut keymap = Keymap::new("us", "", "").unwrap();
+        let mut bar = Bar::default();
+        locked_down(&mut keymap, &mut bar, KEY_LEFTCTRL);
+        unlocked(&mut keymap, &mut bar, InputEvent::Gone(KeyboardId(0)));
+        unlocked(&mut keymap, &mut bar, InputEvent::Down(key(KEY_A)));
+        assert_eq!(labels(&bar), ["a"]);
+    }
+
+    #[test]
+    fn ctrl_held_from_before_a_lock_is_released_when_its_keyboard_goes_away() {
+        let mut keymap = Keymap::new("us", "", "").unwrap();
+        let mut bar = Bar::default();
+        unlocked(&mut keymap, &mut bar, InputEvent::Down(key(KEY_LEFTCTRL)));
+        locked_down(&mut keymap, &mut bar, KEY_B);
+        unlocked(&mut keymap, &mut bar, InputEvent::Gone(KeyboardId(0)));
+        unlocked(&mut keymap, &mut bar, InputEvent::Down(key(KEY_A)));
+        assert_eq!(labels(&bar), ["a"]);
+    }
+
+    #[test]
+    fn a_release_while_locked_empties_the_bar() {
+        let mut keymap = Keymap::new("us", "", "").unwrap();
+        let mut bar = Bar::default();
+        unlocked(&mut keymap, &mut bar, InputEvent::Down(key(KEY_LEFTCTRL)));
+        unlocked(&mut keymap, &mut bar, InputEvent::Down(key(KEY_A)));
+        assert_eq!(labels(&bar), ["Ctrl", "A"]);
+        let up = InputEvent::Up(key(KEY_A));
+        apply_event(&mut keymap, &mut bar, up, Instant::now(), || true);
+        assert!(bar.caps().is_empty());
     }
 
     #[test]
