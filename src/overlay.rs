@@ -8,6 +8,7 @@ use gtk4::prelude::*;
 use gtk4::{gdk, glib};
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
+use crate::args::Position;
 use crate::bar::{Bar, Cap, IDLE_LIMIT};
 use crate::input::InputEvent;
 use crate::keymap::Keymap;
@@ -69,20 +70,31 @@ fn apply_event(keymap: &mut Keymap, bar: &mut Bar, event: InputEvent, now: Insta
 
 /// Shows the bar in a layer-shell window on the named monitor until the process is
 /// stopped.
-pub fn run(monitor_name: String, events: Receiver<InputEvent>, keymap: Keymap) -> glib::ExitCode {
+pub fn run(
+    monitor_name: String,
+    position: Position,
+    events: Receiver<InputEvent>,
+    keymap: Keymap,
+) -> glib::ExitCode {
     let app = gtk4::Application::builder()
         .application_id("dev.tactile.overlay")
         .build();
     let state = RefCell::new(Some((events, keymap)));
     app.connect_activate(move |app| {
         if let Some((events, keymap)) = state.borrow_mut().take() {
-            show(app, &monitor_name, events, keymap);
+            show(app, &monitor_name, position, events, keymap);
         }
     });
     app.run_with_args::<&str>(&[])
 }
 
-fn show(app: &gtk4::Application, monitor_name: &str, events: Receiver<InputEvent>, keymap: Keymap) {
+fn show(
+    app: &gtk4::Application,
+    monitor_name: &str,
+    position: Position,
+    events: Receiver<InputEvent>,
+    keymap: Keymap,
+) {
     let display = gdk::Display::default().expect("GTK opened a display");
     gtk4::style_context_add_provider_for_display(
         &display,
@@ -92,7 +104,7 @@ fn show(app: &gtk4::Application, monitor_name: &str, events: Receiver<InputEvent
     let monitor = find_monitor(&display, monitor_name);
     let row = gtk4::Box::new(gtk4::Orientation::Horizontal, CAP_SPACING);
     row.add_css_class("bar");
-    let window = layer_window(app, &row, monitor.as_ref());
+    let window = layer_window(app, &row, monitor.as_ref(), position);
     let max_width = max_bar_width(
         monitor.as_ref().map(monitor_width),
         first_monitor(&display).as_ref().map(monitor_width),
@@ -176,11 +188,24 @@ fn max_bar_width(focused: Option<i32>, first: Option<i32>) -> i32 {
         .map_or(i32::MAX, |width| width - 2 * EDGE_MARGIN)
 }
 
+/// The edges the bar is pinned to; a bar pinned to one edge is centred along it.
+fn anchored_edges(position: Position) -> &'static [Edge] {
+    match position {
+        Position::TopLeft => &[Edge::Top, Edge::Left],
+        Position::Top => &[Edge::Top],
+        Position::TopRight => &[Edge::Top, Edge::Right],
+        Position::BottomLeft => &[Edge::Bottom, Edge::Left],
+        Position::Bottom => &[Edge::Bottom],
+        Position::BottomRight => &[Edge::Bottom, Edge::Right],
+    }
+}
+
 /// A window on the overlay layer that takes no keyboard focus and lets clicks through.
 fn layer_window(
     app: &gtk4::Application,
     row: &gtk4::Box,
     monitor: Option<&gdk::Monitor>,
+    position: Position,
 ) -> gtk4::Window {
     let window = gtk4::Window::builder()
         .application(app)
@@ -194,8 +219,10 @@ fn layer_window(
     window.set_layer(Layer::Overlay);
     window.set_keyboard_mode(KeyboardMode::None);
     window.set_monitor(monitor);
-    window.set_anchor(Edge::Bottom, true);
-    window.set_margin(Edge::Bottom, EDGE_MARGIN);
+    for &edge in anchored_edges(position) {
+        window.set_anchor(edge, true);
+        window.set_margin(edge, EDGE_MARGIN);
+    }
     window.connect_realize(|window| {
         if let Some(surface) = window.surface() {
             surface.set_input_region(Some(&gtk4::cairo::Region::create()));
