@@ -60,7 +60,7 @@ tactile --position top-right
 To toggle it with a key in `hyprland.lua`:
 
 ```lua
-hl.bind("SUPER + K", hl.dsp.exec_cmd("pkill -x -u $(id -u) tactile || tactile"))
+hl.bind("SUPER + K", hl.dsp.exec_cmd("pkill -x -u $(id -u) tactile || { PATH=$HOME/.cargo/bin:$PATH; exec tactile; }"))
 ```
 
 ## What it shows
