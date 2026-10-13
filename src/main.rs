@@ -22,7 +22,7 @@ fn main() -> glib::ExitCode {
 }
 
 fn start() -> Result<glib::ExitCode, Box<dyn std::error::Error>> {
-    let position = args::parse_position(std::env::args().skip(1))?;
+    let position = args::parse_position(std::env::args_os().skip(1))?;
     let runtime_dir = std::env::var_os("XDG_RUNTIME_DIR").ok_or("XDG_RUNTIME_DIR is not set")?;
     let _lock = lock::acquire(Path::new(&runtime_dir))?;
     let hyprland = hyprland::query()?;

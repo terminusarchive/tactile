@@ -1,3 +1,5 @@
+use std::ffi::OsString;
+
 /// Where the bar sits on the monitor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Position {
@@ -31,26 +33,33 @@ impl std::fmt::Display for UsageError {
 
 impl std::error::Error for UsageError {}
 
-/// Reads the arguments after the program name. Only `--position <value>` exists;
+/// Reads the arguments after the program name; one that is not UTF-8 is shown lossily
+/// in the error. Only `--position <value>` exists;
 /// `--position=<value>`, a missing value and any other argument are usage errors.
-pub fn parse_position(mut args: impl Iterator<Item = String>) -> Result<Position, UsageError> {
+pub fn parse_position(mut args: impl Iterator<Item = OsString>) -> Result<Position, UsageError> {
     let Some(flag) = args.next() else {
         return Ok(Position::default());
     };
     if flag != "--position" {
-        return Err(usage(&format!("unknown argument `{flag}`")));
+        return Err(usage(&format!(
+            "unknown argument `{}`",
+            flag.to_string_lossy()
+        )));
     }
     let Some(value) = args.next() else {
         return Err(usage("`--position` needs a value"));
     };
     if let Some(extra) = args.next() {
-        return Err(usage(&format!("unexpected argument `{extra}`")));
+        return Err(usage(&format!(
+            "unexpected argument `{}`",
+            extra.to_string_lossy()
+        )));
     }
     POSITIONS
         .iter()
-        .find(|(name, _)| *name == value)
+        .find(|(name, _)| value == *name)
         .map(|(_, position)| *position)
-        .ok_or_else(|| usage(&format!("unknown position `{value}`")))
+        .ok_or_else(|| usage(&format!("unknown position `{}`", value.to_string_lossy())))
 }
 
 fn usage(problem: &str) -> UsageError {
@@ -66,7 +75,7 @@ mod tests {
     use super::*;
 
     fn parse(args: &[&str]) -> Result<Position, UsageError> {
-        parse_position(args.iter().map(|arg| arg.to_string()))
+        parse_position(args.iter().map(OsString::from))
     }
 
     #[test]
@@ -103,6 +112,20 @@ mod tests {
         ] {
             assert!(message.contains(value), "{message}");
         }
+    }
+
+    #[test]
+    fn an_argument_that_is_not_utf8_is_an_unknown_argument() {
+        use std::os::unix::ffi::OsStringExt;
+        let bad = std::ffi::OsString::from_vec(vec![b'-', 0xff]);
+        let message = parse_position(std::iter::once(bad))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            message.contains("unknown argument `-\u{fffd}`"),
+            "{message}"
+        );
+        assert!(message.contains("usage: tactile"));
     }
 
     #[test]

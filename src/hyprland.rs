@@ -38,7 +38,7 @@ pub fn query() -> Result<Hyprland, HyprlandError> {
 fn query_with(
     run: impl Fn(&[&str]) -> Result<String, HyprlandError>,
 ) -> Result<Hyprland, HyprlandError> {
-    let option = |name: &str| parse_option(&run(&["getoption", name])?);
+    let option = |name: &str| check_xkb_name(parse_option(&run(&["getoption", name])?)?);
     Ok(Hyprland {
         layout: option("input:kb_layout")?,
         variant: option("input:kb_variant")?,
@@ -113,6 +113,19 @@ fn parse_option(text: &str) -> Result<String, HyprlandError> {
         .find_map(|line| line.strip_prefix("str: "))
         .map(str::to_string)
         .ok_or_else(|| HyprlandError(format!("cannot read hyprctl getoption output: {text:?}")))
+}
+
+/// Accepts only the characters xkb layout, variant and option names are made of, so a
+/// value cannot make libxkbcommon open a path or the keymap compiler see a NUL.
+fn check_xkb_name(value: String) -> Result<String, HyprlandError> {
+    let allowed = |c: char| c.is_ascii_alphanumeric() || "_,:()+-".contains(c);
+    if value.chars().all(allowed) {
+        Ok(value)
+    } else {
+        Err(HyprlandError(format!(
+            "hyprctl gave a keyboard layout setting with characters xkb names do not use: {value:?}"
+        )))
+    }
 }
 
 /// Finds the name of the monitor whose block says `focused: yes`.
@@ -192,6 +205,41 @@ mod tests {
                 focused_monitor: "DP-1".into(),
             })
         );
+    }
+
+    fn query_with_option(name: &str, value: &str) -> Result<Hyprland, HyprlandError> {
+        let wanted = format!("input:{name}");
+        query_with(|args| match args {
+            ["getoption", asked] if *asked == wanted => Ok(format!("str: {value}\nset: true\n")),
+            _ => fake(args),
+        })
+    }
+
+    #[test]
+    fn real_xkb_names_are_accepted() {
+        for (name, value) in [
+            ("kb_layout", "us"),
+            ("kb_layout", "us,de"),
+            ("kb_variant", "de(nodeadkeys)"),
+            ("kb_variant", "intl"),
+            ("kb_options", "caps:escape"),
+            ("kb_options", "grp:alt_shift_toggle"),
+            ("kb_options", "ctrl:nocaps,compose:ralt"),
+            ("kb_options", "lv3:ralt_switch_multikey"),
+            ("kb_layout", ""),
+        ] {
+            assert!(query_with_option(name, value).is_ok(), "{name} {value:?}");
+        }
+    }
+
+    #[test]
+    fn a_layout_variant_or_options_value_outside_the_allowed_set_is_an_error() {
+        for name in ["kb_layout", "kb_variant", "kb_options"] {
+            for value in ["../../etc/passwd", "a/b", "us de", "us\u{7}", "us\u{0}"] {
+                let message = query_with_option(name, value).unwrap_err().to_string();
+                assert!(message.contains(&format!("{value:?}")), "{message}");
+            }
+        }
     }
 
     #[test]
