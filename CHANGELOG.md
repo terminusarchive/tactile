@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-13
+
 ### Security
 
 - Nothing is shown while the session is locked, so keys typed at the lock screen no
