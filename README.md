@@ -8,6 +8,9 @@ key appears as a cap on a translucent bar, which is handy for screencasts and de
 - Hyprland.
 - GTK4, gtk4-layer-shell and libxkbcommon. On Arch: `gtk4`, `gtk4-layer-shell`,
   `libxkbcommon`.
+- To build with `cargo install`: Rust 1.92 or newer, pkg-config, and the development
+  files for those three libraries. Arch's packages include them; other distributions
+  ship them as separate development packages.
 - Your user in the `input` group:
 
   ```sh
@@ -61,6 +64,7 @@ Cargo installs only the command. To add tactile to your application launcher, co
 desktop entry and the icon from this repository:
 
 ```sh
+mkdir -p ~/.local/share/applications ~/.local/share/icons/hicolor/scalable/apps
 cp assets/tactile.desktop ~/.local/share/applications/
 cp assets/tactile.svg ~/.local/share/icons/hicolor/scalable/apps/
 ```
