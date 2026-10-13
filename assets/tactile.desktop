@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=tactile
+Comment=Show pressed keys as an on-screen overlay
+Icon=tactile
+Exec=sh -c "pkill -x tactile || exec tactile"
+Terminal=false
+Categories=Utility;
+Keywords=keys;keyboard;overlay;screencast;

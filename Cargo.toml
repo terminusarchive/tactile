@@ -1,7 +1,28 @@
 [package]
-name = "tactile"
+name = "tactile-keys"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.92"
+description = "On-screen overlay of pressed keys for Hyprland"
+license = "MIT"
+repository = "https://github.com/terminusarchive/tactile"
+readme = "README.md"
+keywords = ["wayland", "hyprland", "keyboard", "overlay", "screencast"]
+categories = ["command-line-utilities", "gui"]
+include = [
+    "src/**",
+    "Cargo.toml",
+    "Cargo.lock",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "assets/tactile.svg",
+    "assets/tactile.desktop",
+]
+
+[[bin]]
+name = "tactile"
+path = "src/main.rs"
 
 [dependencies]
 async-channel = "2.5.0"

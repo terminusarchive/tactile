@@ -185,12 +185,10 @@ fn monitor_width(monitor: &gdk::Monitor) -> i32 {
     monitor.geometry().width()
 }
 
-/// The widest the bar may be: the focused monitor's width less both margins, or the
-/// first monitor's when the focused one was not found, so the trim always has a bound.
+/// The widest the bar may be: 60% of the focused monitor's width, or of the first
+/// monitor's when the focused one was not found, so the trim always has a bound.
 fn max_bar_width(focused: Option<i32>, first: Option<i32>) -> i32 {
-    focused
-        .or(first)
-        .map_or(i32::MAX, |width| width - 2 * EDGE_MARGIN)
+    focused.or(first).map_or(i32::MAX, |width| width * 60 / 100)
 }
 
 /// The edges the bar is pinned to; a bar pinned to one edge is centred along it.
@@ -236,7 +234,7 @@ fn layer_window(
     window
 }
 
-/// Draws the bar's caps, dropping the oldest while they are wider than the monitor.
+/// Draws the bar's caps, dropping the oldest while they are wider than 60% of the monitor's width.
 fn redraw(window: &gtk4::Window, row: &gtk4::Box, bar: &mut Bar, max_width: i32) {
     show_caps(row, bar.caps());
     while bar.caps().len() > 1 && natural_width(row) > max_width {
@@ -285,11 +283,8 @@ mod tests {
 
     #[test]
     fn unfound_monitor_is_bounded_by_the_first_monitor() {
-        assert_eq!(max_bar_width(None, Some(1920)), 1920 - 2 * EDGE_MARGIN);
-        assert_eq!(
-            max_bar_width(Some(2560), Some(1920)),
-            2560 - 2 * EDGE_MARGIN
-        );
+        assert_eq!(max_bar_width(None, Some(1920)), 1152);
+        assert_eq!(max_bar_width(Some(2560), Some(1920)), 1536);
     }
 
     fn key(code: u32) -> KeyId {
