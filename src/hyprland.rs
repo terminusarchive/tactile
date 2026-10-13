@@ -1,5 +1,12 @@
 use std::fmt;
+use std::io::{Read, Write};
+use std::os::unix::net::UnixStream;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Duration;
+
+/// How long a stuck compositor may hold up a key press.
+const SOCKET_TIMEOUT: Duration = Duration::from_millis(100);
 
 /// What tactile asks Hyprland once at launch. Empty strings mean "unset".
 #[derive(Debug, PartialEq, Eq)]
@@ -31,13 +38,50 @@ pub fn query() -> Result<Hyprland, HyprlandError> {
 fn query_with(
     run: impl Fn(&[&str]) -> Result<String, HyprlandError>,
 ) -> Result<Hyprland, HyprlandError> {
-    let option = |name: &str| parse_option(&run(&["getoption", name])?);
+    let option = |name: &str| check_xkb_name(parse_option(&run(&["getoption", name])?)?);
     Ok(Hyprland {
         layout: option("input:kb_layout")?,
         variant: option("input:kb_variant")?,
         options: option("input:kb_options")?,
         focused_monitor: parse_focused_monitor(&run(&["monitors"])?)?,
     })
+}
+
+/// True unless Hyprland answers that the session is unlocked. Any failure counts as
+/// locked, so nothing is shown when the answer cannot be had.
+pub fn locked() -> bool {
+    socket_path().is_none_or(|path| locked_at(&path))
+}
+
+fn socket_path() -> Option<PathBuf> {
+    let runtime = std::env::var_os("XDG_RUNTIME_DIR")?;
+    let instance = std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE")?;
+    Some(
+        PathBuf::from(runtime)
+            .join("hypr")
+            .join(instance)
+            .join(".socket.sock"),
+    )
+}
+
+/// Asks the request socket at `path` the plain request `locked`.
+fn locked_at(path: &Path) -> bool {
+    !ask(path, "locked").is_ok_and(|reply| is_unlocked(&reply))
+}
+
+fn ask(path: &Path, request: &str) -> std::io::Result<String> {
+    let mut socket = UnixStream::connect(path)?;
+    socket.set_read_timeout(Some(SOCKET_TIMEOUT))?;
+    socket.set_write_timeout(Some(SOCKET_TIMEOUT))?;
+    socket.write_all(request.as_bytes())?;
+    let mut reply = String::new();
+    socket.read_to_string(&mut reply)?;
+    Ok(reply)
+}
+
+/// Only the exact reply `false` says the session is unlocked.
+fn is_unlocked(reply: &str) -> bool {
+    reply.trim() == "false"
 }
 
 fn run_command(program: &str, args: &[&str]) -> Result<String, HyprlandError> {
@@ -71,6 +115,19 @@ fn parse_option(text: &str) -> Result<String, HyprlandError> {
         .ok_or_else(|| HyprlandError(format!("cannot read hyprctl getoption output: {text:?}")))
 }
 
+/// Accepts only the characters xkb layout, variant and option names are made of, so a
+/// value cannot make libxkbcommon open a path or the keymap compiler see a NUL.
+fn check_xkb_name(value: String) -> Result<String, HyprlandError> {
+    let allowed = |c: char| c.is_ascii_alphanumeric() || "_,:()+-".contains(c);
+    if value.chars().all(allowed) {
+        Ok(value)
+    } else {
+        Err(HyprlandError(format!(
+            "hyprctl gave a keyboard layout setting with characters xkb names do not use: {value:?}"
+        )))
+    }
+}
+
 /// Finds the name of the monitor whose block says `focused: yes`.
 fn parse_focused_monitor(text: &str) -> Result<String, HyprlandError> {
     let mut current = None;
@@ -99,6 +156,34 @@ mod tests {
     const EMPTY: &str = "str: \nset: true\n";
     const MONITORS: &str = "Monitor HDMI-A-1 (ID 0):\n\t1920x1080@60.00000 at 3840x0\n\tfocused: no\n\nMonitor DP-1 (ID 1):\n\t3840x2160@60.00000 at 0x0\n\tactive workspace: 1 (1)\n\tfocused: yes\n\tdpmsStatus: 1\n\n";
 
+    // Captured from the live request socket: writing `locked` to
+    // $XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket.sock answered `false`.
+    // The locked reply is derived from it, not captured: Hyprland prints the boolean.
+    const UNLOCKED_REPLY: &str = "false";
+    const LOCKED_REPLY: &str = "true";
+
+    #[test]
+    fn the_unlocked_reply_is_unlocked() {
+        assert!(is_unlocked(UNLOCKED_REPLY));
+    }
+
+    #[test]
+    fn the_locked_reply_is_locked() {
+        assert!(!is_unlocked(LOCKED_REPLY));
+    }
+
+    #[test]
+    fn any_other_reply_is_locked() {
+        for reply in ["", "unknown request", "{\"locked\": false}", "False"] {
+            assert!(!is_unlocked(reply), "{reply:?}");
+        }
+    }
+
+    #[test]
+    fn a_socket_that_cannot_be_reached_is_locked() {
+        assert!(locked_at(Path::new("/nonexistent/.socket.sock")));
+    }
+
     fn fake(args: &[&str]) -> Result<String, HyprlandError> {
         let text = match args {
             ["getoption", "input:kb_layout"] => LAYOUT,
@@ -120,6 +205,41 @@ mod tests {
                 focused_monitor: "DP-1".into(),
             })
         );
+    }
+
+    fn query_with_option(name: &str, value: &str) -> Result<Hyprland, HyprlandError> {
+        let wanted = format!("input:{name}");
+        query_with(|args| match args {
+            ["getoption", asked] if *asked == wanted => Ok(format!("str: {value}\nset: true\n")),
+            _ => fake(args),
+        })
+    }
+
+    #[test]
+    fn real_xkb_names_are_accepted() {
+        for (name, value) in [
+            ("kb_layout", "us"),
+            ("kb_layout", "us,de"),
+            ("kb_variant", "de(nodeadkeys)"),
+            ("kb_variant", "intl"),
+            ("kb_options", "caps:escape"),
+            ("kb_options", "grp:alt_shift_toggle"),
+            ("kb_options", "ctrl:nocaps,compose:ralt"),
+            ("kb_options", "lv3:ralt_switch_multikey"),
+            ("kb_layout", ""),
+        ] {
+            assert!(query_with_option(name, value).is_ok(), "{name} {value:?}");
+        }
+    }
+
+    #[test]
+    fn a_layout_variant_or_options_value_outside_the_allowed_set_is_an_error() {
+        for name in ["kb_layout", "kb_variant", "kb_options"] {
+            for value in ["../../etc/passwd", "a/b", "us de", "us\u{7}", "us\u{0}"] {
+                let message = query_with_option(name, value).unwrap_err().to_string();
+                assert!(message.contains(&format!("{value:?}")), "{message}");
+            }
+        }
     }
 
     #[test]

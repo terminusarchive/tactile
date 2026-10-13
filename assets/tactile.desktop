@@ -3,7 +3,7 @@ Type=Application
 Name=tactile
 Comment=Show pressed keys as an on-screen overlay
 Icon=tactile
-Exec=sh -c "pkill -x tactile || { PATH=\\$HOME/.cargo/bin:\\$PATH; exec tactile; }"
+Exec=sh -c "pkill -x -u \\$(id -u) tactile || { PATH=\\$HOME/.cargo/bin:\\$PATH; exec tactile; }"
 Terminal=false
 Categories=Utility;
 Keywords=keys;keyboard;overlay;screencast;

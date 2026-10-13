@@ -17,15 +17,28 @@ key appears as a cap on a translucent bar, which is handy for screencasts and de
   sudo usermod -aG input $USER
   ```
 
-  Log out and back in for it to take effect.
+  Log out and back in for it to take effect. See Security below.
+
+## Security
+
+Membership of the `input` group lets every program you run read all keystrokes from
+every keyboard on the machine, including at the lock screen and in other sessions, and
+inject key presses. That is true whether or not tactile is running, and it stays true
+after tactile is removed. To leave the group, run `sudo gpasswd -d $USER input`, then
+log out and back in.
+
+Tactile reads the keys to draw them and does nothing else with them: none of what is typed is
+written to disk, logged or sent anywhere, and nothing is shown while the session is locked.
+The overlay does show everything you type, passwords included.
 
 ## Install
 
 ```sh
-cargo install tactile-keys
+cargo install --locked tactile-keys
 ```
 
-This installs the `tactile` command.
+This installs the `tactile` command. `--locked` builds with the dependency versions that
+were tested.
 
 ## Usage
 
@@ -34,7 +47,8 @@ tactile
 ```
 
 The overlay appears on the monitor that has focus and runs until you stop it. Only one
-runs at a time. Stop it with `pkill -x tactile`.
+runs at a time. Stop it with `pkill -x -u $(id -u) tactile`, which signals only your own
+processes.
 
 `--position` sets where the bar sits: `top-left`, `top`, `top-right`, `bottom-left`,
 `bottom` (the default) or `bottom-right`.
@@ -43,10 +57,10 @@ runs at a time. Stop it with `pkill -x tactile`.
 tactile --position top-right
 ```
 
-To toggle it with a key in `hyprland.conf`:
+To toggle it with a key in `hyprland.lua`:
 
-```
-bind = SUPER, K, exec, pkill -x tactile || tactile
+```lua
+hl.bind("SUPER + K", hl.dsp.exec_cmd("pkill -x -u $(id -u) tactile || { PATH=$HOME/.cargo/bin:$PATH; exec tactile; }"))
 ```
 
 ## What it shows
@@ -55,8 +69,6 @@ bind = SUPER, K, exec, pkill -x tactile || tactile
 - A count (`×2`, `×3`) when a modifier or shortcut key repeats.
 - Shift folded into the typed character: `H`, `!`.
 - The bar clears after 2 seconds with no key pressed or held.
-
-It shows everything you type, passwords included.
 
 ## Launcher entry
 
