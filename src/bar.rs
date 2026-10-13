@@ -86,6 +86,14 @@ impl Bar {
         }
     }
 
+    /// Forgets everything: no caps, no held keys, no Shift cap.
+    pub fn clear(&mut self) {
+        self.caps.clear();
+        self.held_keys.clear();
+        self.shift_cap = None;
+        self.last_activity = None;
+    }
+
     pub fn drop_oldest(&mut self) {
         if !self.caps.is_empty() {
             let dropped = self.caps.remove(0);
