@@ -27,9 +27,9 @@ inject key presses. That is true whether or not tactile is running, and it stays
 after tactile is removed. To leave the group, run `sudo gpasswd -d $USER input`, then
 log out and back in.
 
-Tactile reads the keys to draw them and does nothing else with them: nothing is written
-to disk, logged or sent anywhere, and nothing is shown while the session is locked. The
-overlay does show everything you type, passwords included.
+Tactile reads the keys to draw them and does nothing else with them: none of what is typed is
+written to disk, logged or sent anywhere, and nothing is shown while the session is locked.
+The overlay does show everything you type, passwords included.
 
 ## Install
 
