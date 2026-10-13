@@ -759,7 +759,6 @@ dependencies = [
  "evdev",
  "gtk4",
  "gtk4-layer-shell",
- "libc",
  "xkbcommon",
 ]
 

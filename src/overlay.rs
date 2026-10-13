@@ -78,6 +78,7 @@ pub fn run(
 ) -> glib::ExitCode {
     let app = gtk4::Application::builder()
         .application_id("dev.tactile.overlay")
+        .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
         .build();
     let state = RefCell::new(Some((events, keymap)));
     app.connect_activate(move |app| {
