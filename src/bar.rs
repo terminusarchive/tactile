@@ -67,9 +67,11 @@ impl Bar {
         self.release_where(|held_key| held_key.key == key);
     }
 
-    pub fn keyboard_gone(&mut self, keyboard: KeyboardId, now: Instant) {
+    /// Lets go of every key held on `keyboard` and returns their codes, so the caller
+    /// can release them in the key map too.
+    pub fn keyboard_gone(&mut self, keyboard: KeyboardId, now: Instant) -> Vec<u32> {
         self.last_activity = Some(now);
-        self.release_where(|held_key| held_key.key.keyboard == keyboard);
+        self.release_where(|held_key| held_key.key.keyboard == keyboard)
     }
 
     /// Empties the bar once the idle limit has passed since the last press or release
@@ -133,7 +135,7 @@ impl Bar {
         id
     }
 
-    fn release_where(&mut self, is_released: impl Fn(&HeldKey) -> bool) {
+    fn release_where(&mut self, is_released: impl Fn(&HeldKey) -> bool) -> Vec<u32> {
         let (released, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut self.held_keys)
             .into_iter()
             .partition(is_released);
@@ -149,6 +151,7 @@ impl Bar {
             self.unlight(cap);
             self.shift_cap = None;
         }
+        released.iter().map(|held_key| held_key.key.code).collect()
     }
 
     fn is_held(&self, cap: CapId) -> bool {

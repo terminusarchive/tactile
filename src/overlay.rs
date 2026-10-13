@@ -64,7 +64,11 @@ fn apply_event(keymap: &mut Keymap, bar: &mut Bar, event: InputEvent, now: Insta
             keymap.release(key.code);
             bar.release(key, now);
         }
-        InputEvent::Gone(keyboard) => bar.keyboard_gone(keyboard, now),
+        InputEvent::Gone(keyboard) => {
+            for code in bar.keyboard_gone(keyboard, now) {
+                keymap.release(code);
+            }
+        }
     }
 }
 
@@ -313,6 +317,27 @@ mod tests {
             now,
         );
         apply_event(&mut keymap, &mut bar, InputEvent::Down(key(KEY_A)), now);
+        let labels: Vec<_> = bar.caps().iter().map(|cap| cap.label.as_str()).collect();
+        assert_eq!(labels, ["Ctrl", "a"]);
+    }
+
+    #[test]
+    fn ctrl_held_on_an_unplugged_keyboard_no_longer_affects_the_next_key() {
+        let mut keymap = Keymap::new("us", "", "").unwrap();
+        let mut bar = Bar::default();
+        let now = Instant::now();
+        let on_second = KeyId {
+            keyboard: KeyboardId(1),
+            code: KEY_A,
+        };
+        apply_event(
+            &mut keymap,
+            &mut bar,
+            InputEvent::Down(key(KEY_LEFTCTRL)),
+            now,
+        );
+        apply_event(&mut keymap, &mut bar, InputEvent::Gone(KeyboardId(0)), now);
+        apply_event(&mut keymap, &mut bar, InputEvent::Down(on_second), now);
         let labels: Vec<_> = bar.caps().iter().map(|cap| cap.label.as_str()).collect();
         assert_eq!(labels, ["Ctrl", "a"]);
     }
