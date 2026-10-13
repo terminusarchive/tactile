@@ -61,6 +61,12 @@ impl Examined {
     }
 }
 
+/// Opens the node read-only: `Device::open` would take it read-write when the
+/// group allows, and tactile never writes to a keyboard.
+fn open_read_only(path: &Path) -> std::io::Result<Device> {
+    Device::from_fd(fs::OpenOptions::new().read(true).open(path)?.into())
+}
+
 /// Opens keyboards under `dir` that are not open yet and gives each a reader thread.
 struct Scanner {
     dir: PathBuf,
@@ -76,7 +82,7 @@ impl Scanner {
         let take_unexamined = self.examined.lock().unwrap().take_unexamined(&listed);
         let mut opened = 0;
         for path in take_unexamined {
-            let Ok(device) = Device::open(&path) else {
+            let Ok(device) = open_read_only(&path) else {
                 continue;
             };
             self.examined.lock().unwrap().settle(path.clone());
