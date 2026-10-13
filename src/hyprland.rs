@@ -47,9 +47,10 @@ fn run_command(program: &str, args: &[&str]) -> Result<String, HyprlandError> {
         .map_err(|e| HyprlandError(format!("cannot run {program}: {e}")))?;
     if !output.status.success() {
         return Err(HyprlandError(format!(
-            "{program} {} failed: {}",
+            "Hyprland is not running or not answering: {program} {} failed with {}: {}",
             args.join(" "),
-            output.status
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
         )));
     }
     String::from_utf8(output.stdout)
@@ -128,5 +129,13 @@ mod tests {
     #[test]
     fn failing_command_is_an_error() {
         assert!(run_command("false", &[]).is_err());
+    }
+
+    #[test]
+    fn failing_command_says_hyprland_is_not_running_and_shows_its_text() {
+        let error = run_command("sh", &["-c", "echo no socket >&2; exit 4"]).unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("Hyprland is not running or not answering"));
+        assert!(message.contains("no socket"));
     }
 }
