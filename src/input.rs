@@ -79,11 +79,11 @@ impl Scanner {
             let Ok(device) = Device::open(&path) else {
                 continue;
             };
+            self.examined.lock().unwrap().settle(path.clone());
             if device.supported_keys().is_some_and(is_keyboard) {
-                self.spawn_reader(device, path.clone());
+                self.spawn_reader(device, path);
                 opened += 1;
             }
-            self.examined.lock().unwrap().settle(path);
         }
         Ok(opened)
     }
