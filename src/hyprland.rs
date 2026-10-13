@@ -41,16 +41,22 @@ fn query_with(
 }
 
 fn run_command(program: &str, args: &[&str]) -> Result<String, HyprlandError> {
+    let not_answering = "Hyprland is not running or not answering";
     let output = Command::new(program)
         .args(args)
         .output()
-        .map_err(|e| HyprlandError(format!("cannot run {program}: {e}")))?;
+        .map_err(|e| HyprlandError(format!("{not_answering}: cannot run {program}: {e}")))?;
     if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let text = [stderr.trim(), stdout.trim()]
+            .into_iter()
+            .find(|text| !text.is_empty())
+            .map_or(String::new(), |text| format!(": {text}"));
         return Err(HyprlandError(format!(
-            "Hyprland is not running or not answering: {program} {} failed with {}: {}",
+            "{not_answering}: {program} {} failed with {}{text}",
             args.join(" "),
-            output.status,
-            String::from_utf8_lossy(&output.stderr).trim()
+            output.status
         )));
     }
     String::from_utf8(output.stdout)
@@ -129,6 +135,29 @@ mod tests {
     #[test]
     fn failing_command_is_an_error() {
         assert!(run_command("false", &[]).is_err());
+    }
+
+    #[test]
+    fn missing_command_says_hyprland_is_not_running() {
+        let error = run_command("hyprctl-that-does-not-exist", &[]).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .starts_with("Hyprland is not running or not answering")
+        );
+    }
+
+    #[test]
+    fn failing_command_with_text_on_stdout_shows_it() {
+        let error = run_command("sh", &["-c", "echo no socket; exit 4"]).unwrap_err();
+        assert!(error.to_string().ends_with(": no socket"));
+    }
+
+    #[test]
+    fn failing_command_without_text_has_no_dangling_colon() {
+        let error = run_command("sh", &["-c", "exit 4"]).unwrap_err();
+        assert!(!error.to_string().ends_with(':'));
+        assert!(!error.to_string().ends_with(": "));
     }
 
     #[test]

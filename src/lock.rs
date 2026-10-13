@@ -12,10 +12,9 @@ pub fn acquire(dir: &Path) -> io::Result<File> {
         .open(dir.join("tactile.lock"))?;
     match file.try_lock() {
         Ok(()) => Ok(file),
-        Err(TryLockError::WouldBlock) => Err(io::Error::new(
-            io::ErrorKind::WouldBlock,
-            "tactile is already running",
-        )),
+        Err(TryLockError::WouldBlock) => {
+            Err(io::Error::new(io::ErrorKind::WouldBlock, "already running"))
+        }
         Err(TryLockError::Error(error)) => Err(error),
     }
 }
@@ -36,7 +35,7 @@ mod tests {
         let _first = acquire(&dir).unwrap();
         let error = acquire(&dir).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::WouldBlock);
-        assert_eq!(error.to_string(), "tactile is already running");
+        assert_eq!(error.to_string(), "already running");
     }
 
     #[test]
