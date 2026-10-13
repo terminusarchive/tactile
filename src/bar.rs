@@ -42,13 +42,13 @@ pub struct Bar {
     caps: Vec<Cap>,
     held_keys: Vec<HeldKey>,
     shift_cap: Option<CapId>,
-    last_press: Option<Instant>,
+    last_activity: Option<Instant>,
     next_cap_id: u64,
 }
 
 impl Bar {
     pub fn press(&mut self, key: KeyId, press: Press, now: Instant) {
-        self.last_press = Some(now);
+        self.last_activity = Some(now);
         let held = press.held;
         let (cap, is_shift) = match press.kind {
             KeyKind::Modifier(Modifier::Shift) => (None, true),
@@ -62,29 +62,34 @@ impl Bar {
         self.held_keys.push(HeldKey { key, cap, is_shift });
     }
 
-    pub fn release(&mut self, key: KeyId) {
+    pub fn release(&mut self, key: KeyId, now: Instant) {
+        self.last_activity = Some(now);
         self.release_where(|held_key| held_key.key == key);
     }
 
-    pub fn keyboard_gone(&mut self, keyboard: KeyboardId) {
+    pub fn keyboard_gone(&mut self, keyboard: KeyboardId, now: Instant) {
+        self.last_activity = Some(now);
         self.release_where(|held_key| held_key.key.keyboard == keyboard);
     }
 
-    /// Empties the bar once the idle limit has passed since the last press
+    /// Empties the bar once the idle limit has passed since the last press or release
     /// and no key is held.
     pub fn clear_if_idle(&mut self, now: Instant) {
         let is_idle = self
-            .last_press
+            .last_activity
             .is_some_and(|pressed| now.duration_since(pressed) >= IDLE_LIMIT);
         if is_idle && self.held_keys.is_empty() {
             self.caps.clear();
-            self.last_press = None;
+            self.last_activity = None;
         }
     }
 
     pub fn drop_oldest(&mut self) {
         if !self.caps.is_empty() {
-            self.caps.remove(0);
+            let dropped = self.caps.remove(0);
+            if self.shift_cap == Some(dropped.id) {
+                self.shift_cap = None;
+            }
         }
     }
 
@@ -134,7 +139,9 @@ impl Bar {
             .partition(is_released);
         self.held_keys = kept;
         for cap in released.iter().filter_map(|held_key| held_key.cap) {
-            self.unlight(cap);
+            if !self.is_held(cap) {
+                self.unlight(cap);
+            }
         }
         let shift_let_go = released.iter().any(|held_key| held_key.is_shift)
             && !self.held_keys.iter().any(|held_key| held_key.is_shift);
@@ -142,6 +149,12 @@ impl Bar {
             self.unlight(cap);
             self.shift_cap = None;
         }
+    }
+
+    fn is_held(&self, cap: CapId) -> bool {
+        self.held_keys
+            .iter()
+            .any(|held_key| held_key.cap == Some(cap))
     }
 
     fn unlight(&mut self, id: CapId) {
@@ -233,7 +246,7 @@ mod tests {
         let mut bar = Bar::default();
         let now = Instant::now();
         bar.press(key(1), modifier(Modifier::Shift, none()), now);
-        bar.release(key(1));
+        bar.release(key(1), now);
         assert!(bar.caps().is_empty());
     }
 
@@ -252,7 +265,7 @@ mod tests {
         let now = Instant::now();
         bar.press(key(1), modifier(Modifier::Shift, none()), now);
         bar.press(key(2), shortcut("Enter", shift()), now);
-        bar.release(key(2));
+        bar.release(key(2), now);
         bar.press(key(3), shortcut("Tab", shift()), now);
         assert_eq!(labels(&bar), ["Shift", "Enter", "Tab"]);
     }
@@ -263,9 +276,9 @@ mod tests {
         let now = Instant::now();
         bar.press(key(1), modifier(Modifier::Shift, none()), now);
         bar.press(key(2), shortcut("Enter", shift()), now);
-        bar.release(key(2));
+        bar.release(key(2), now);
         assert!(bar.caps()[0].lit);
-        bar.release(key(1));
+        bar.release(key(1), now);
         assert!(!bar.caps()[0].lit);
     }
 
@@ -275,8 +288,8 @@ mod tests {
         let now = Instant::now();
         bar.press(key(1), modifier(Modifier::Shift, none()), now);
         bar.press(key(2), shortcut("Enter", shift()), now);
-        bar.release(key(1));
-        bar.release(key(2));
+        bar.release(key(1), now);
+        bar.release(key(2), now);
         bar.press(key(1), modifier(Modifier::Shift, none()), now);
         bar.press(key(3), shortcut("Tab", shift()), now);
         assert_eq!(labels(&bar), ["Shift", "Enter", "Shift", "Tab"]);
@@ -285,9 +298,10 @@ mod tests {
     #[test]
     fn cap_is_lit_from_press_to_release() {
         let mut bar = Bar::default();
-        bar.press(key(2), typed("h", none()), Instant::now());
+        let now = Instant::now();
+        bar.press(key(2), typed("h", none()), now);
         assert!(bar.caps()[0].lit);
-        bar.release(key(2));
+        bar.release(key(2), now);
         assert!(!bar.caps()[0].lit);
     }
 
@@ -297,7 +311,7 @@ mod tests {
         let now = Instant::now();
         for _ in 0..3 {
             bar.press(key(2), shortcut("Enter", none()), now);
-            bar.release(key(2));
+            bar.release(key(2), now);
         }
         assert_eq!(bar.caps().len(), 1);
         assert_eq!(bar.caps()[0].count, 3);
@@ -311,7 +325,7 @@ mod tests {
         let now = Instant::now();
         for _ in 0..2 {
             bar.press(key(1), modifier(Modifier::Ctrl, none()), now);
-            bar.release(key(1));
+            bar.release(key(1), now);
         }
         assert_eq!(bar.caps().len(), 1);
         assert_eq!(bar.caps()[0].count, 2);
@@ -332,17 +346,17 @@ mod tests {
         let now = Instant::now();
         for (code, label) in [(35, "h"), (18, "e"), (38, "l"), (38, "l"), (24, "o")] {
             bar.press(key(code), typed(label, none()), now);
-            bar.release(key(code));
+            bar.release(key(code), now);
         }
         assert_eq!(labels(&bar), ["h", "e", "l", "l", "o"]);
     }
 
     #[test]
-    fn bar_empties_two_seconds_after_last_press() {
+    fn bar_empties_two_seconds_after_last_activity() {
         let mut bar = Bar::default();
         let start = Instant::now();
         bar.press(key(2), typed("h", none()), start);
-        bar.release(key(2));
+        bar.release(key(2), start);
         bar.clear_if_idle(start + Duration::from_millis(1999));
         assert_eq!(bar.caps().len(), 1);
         bar.clear_if_idle(start + Duration::from_secs(2));
@@ -368,7 +382,7 @@ mod tests {
         };
         bar.press(key(2), typed("a", none()), now);
         bar.press(on_other, typed("b", none()), now);
-        bar.keyboard_gone(KB);
+        bar.keyboard_gone(KB, now);
         assert!(!bar.caps()[0].lit);
         assert!(bar.caps()[1].lit);
     }
@@ -379,7 +393,7 @@ mod tests {
         let now = Instant::now();
         bar.press(key(1), modifier(Modifier::Shift, none()), now);
         bar.press(key(2), shortcut("Enter", shift()), now);
-        bar.keyboard_gone(KB);
+        bar.keyboard_gone(KB, now);
         assert!(bar.caps().iter().all(|cap| !cap.lit));
     }
 
@@ -391,5 +405,73 @@ mod tests {
         bar.press(key(3), typed("b", none()), now);
         bar.drop_oldest();
         assert_eq!(labels(&bar), ["b"]);
+    }
+
+    #[test]
+    fn idle_time_counts_from_the_last_release() {
+        let mut bar = Bar::default();
+        let start = Instant::now();
+        let released = start + Duration::from_secs(5);
+        bar.press(key(2), typed("a", none()), start);
+        bar.release(key(2), released);
+        bar.clear_if_idle(released);
+        assert_eq!(bar.caps().len(), 1);
+        bar.clear_if_idle(released + Duration::from_secs(2));
+        assert!(bar.caps().is_empty());
+    }
+
+    #[test]
+    fn idle_time_counts_from_the_keyboard_going_away() {
+        let mut bar = Bar::default();
+        let start = Instant::now();
+        let gone = start + Duration::from_secs(5);
+        bar.press(key(2), typed("a", none()), start);
+        bar.keyboard_gone(KB, gone);
+        bar.clear_if_idle(gone);
+        assert_eq!(bar.caps().len(), 1);
+        bar.clear_if_idle(gone + Duration::from_secs(2));
+        assert!(bar.caps().is_empty());
+    }
+
+    #[test]
+    fn counted_cap_stays_lit_while_any_key_merged_into_it_is_held() {
+        let mut bar = Bar::default();
+        let now = Instant::now();
+        let on_other = KeyId {
+            keyboard: OTHER_KB,
+            code: 28,
+        };
+        bar.press(key(28), shortcut("Enter", none()), now);
+        bar.press(on_other, shortcut("Enter", none()), now);
+        bar.release(key(28), now);
+        assert!(bar.caps()[0].lit);
+        bar.release(on_other, now);
+        assert!(!bar.caps()[0].lit);
+    }
+
+    #[test]
+    fn counted_cap_stays_lit_when_one_keyboard_holding_it_goes_away() {
+        let mut bar = Bar::default();
+        let now = Instant::now();
+        let on_other = KeyId {
+            keyboard: OTHER_KB,
+            code: 28,
+        };
+        bar.press(key(28), shortcut("Enter", none()), now);
+        bar.press(on_other, shortcut("Enter", none()), now);
+        bar.keyboard_gone(KB, now);
+        assert!(bar.caps()[0].lit);
+    }
+
+    #[test]
+    fn shift_cap_returns_after_it_was_dropped_while_shift_is_held() {
+        let mut bar = Bar::default();
+        let now = Instant::now();
+        bar.press(key(1), modifier(Modifier::Shift, none()), now);
+        bar.press(key(2), shortcut("Enter", shift()), now);
+        bar.drop_oldest();
+        bar.drop_oldest();
+        bar.press(key(3), shortcut("Tab", shift()), now);
+        assert_eq!(labels(&bar), ["Shift", "Tab"]);
     }
 }
