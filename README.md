@@ -34,7 +34,7 @@ tactile
 ```
 
 The overlay appears on the monitor that has focus and runs until you stop it. Only one
-runs at a time. Stop it with `pkill tactile`.
+runs at a time. Stop it with `pkill -x tactile`.
 
 `--position` sets where the bar sits: `top-left`, `top`, `top-right`, `bottom-left`,
 `bottom` (the default) or `bottom-right`.
