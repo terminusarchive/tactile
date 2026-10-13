@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use crate::keymap::{KeyKind, Modifier, Modifiers, Press};
 
-const IDLE_LIMIT: Duration = Duration::from_secs(2);
+pub const IDLE_LIMIT: Duration = Duration::from_secs(2);
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct KeyboardId(pub u32);

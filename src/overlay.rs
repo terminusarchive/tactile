@@ -1,16 +1,17 @@
 use std::cell::RefCell;
-use std::sync::mpsc::Receiver;
-use std::time::{Duration, Instant};
+use std::rc::Rc;
+use std::time::Instant;
+
+use async_channel::Receiver;
 
 use gtk4::prelude::*;
 use gtk4::{gdk, glib};
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
-use crate::bar::{Bar, Cap};
+use crate::bar::{Bar, Cap, IDLE_LIMIT};
 use crate::input::InputEvent;
 use crate::keymap::Keymap;
 
-const POLL_INTERVAL: Duration = Duration::from_millis(20);
 const EDGE_MARGIN: i32 = 48;
 const CAP_SPACING: i32 = 10;
 
@@ -92,25 +93,57 @@ fn show(app: &gtk4::Application, monitor_name: &str, events: Receiver<InputEvent
     let row = gtk4::Box::new(gtk4::Orientation::Horizontal, CAP_SPACING);
     row.add_css_class("bar");
     let window = layer_window(app, &row, monitor.as_ref());
-    let max_width = monitor
-        .map(|monitor| monitor.geometry().width() - 2 * EDGE_MARGIN)
-        .unwrap_or(i32::MAX);
+    let max_width = max_bar_width(
+        monitor.as_ref().map(monitor_width),
+        first_monitor(&display).as_ref().map(monitor_width),
+    );
 
-    let mut keymap = keymap;
-    let mut bar = Bar::default();
-    glib::timeout_add_local(POLL_INTERVAL, move || {
-        let caps_before = bar.caps().len();
-        let mut changed = false;
-        while let Ok(event) = events.try_recv() {
-            apply_event(&mut keymap, &mut bar, event, Instant::now());
-            changed = true;
+    let overlay = Rc::new(RefCell::new(Overlay {
+        window,
+        row,
+        bar: Bar::default(),
+        keymap,
+        max_width,
+        idle_timer: None,
+    }));
+    glib::spawn_future_local(async move {
+        while let Ok(event) = events.recv().await {
+            handle_event(&overlay, event);
         }
-        bar.clear_if_idle(Instant::now());
-        if changed || bar.caps().len() != caps_before {
-            redraw(&window, &row, &mut bar, max_width);
-        }
-        glib::ControlFlow::Continue
     });
+}
+
+/// Everything the main loop touches when a key arrives or the bar goes idle.
+struct Overlay {
+    window: gtk4::Window,
+    row: gtk4::Box,
+    bar: Bar,
+    keymap: Keymap,
+    max_width: i32,
+    idle_timer: Option<glib::SourceId>,
+}
+
+/// Applies the event, redraws, and restarts the idle-clear timer. The timer exists
+/// only after an event, so an idle tactile wakes for nothing.
+fn handle_event(overlay: &Rc<RefCell<Overlay>>, event: InputEvent) {
+    let mut guard = overlay.borrow_mut();
+    let this = &mut *guard;
+    apply_event(&mut this.keymap, &mut this.bar, event, Instant::now());
+    redraw(&this.window, &this.row, &mut this.bar, this.max_width);
+    if let Some(timer) = this.idle_timer.take() {
+        timer.remove();
+    }
+    this.idle_timer = Some(clear_when_idle(Rc::clone(overlay)));
+}
+
+fn clear_when_idle(overlay: Rc<RefCell<Overlay>>) -> glib::SourceId {
+    glib::timeout_add_local_once(IDLE_LIMIT, move || {
+        let mut guard = overlay.borrow_mut();
+        let this = &mut *guard;
+        this.idle_timer = None;
+        this.bar.clear_if_idle(Instant::now());
+        redraw(&this.window, &this.row, &mut this.bar, this.max_width);
+    })
 }
 
 fn css_provider() -> gtk4::CssProvider {
@@ -125,6 +158,22 @@ fn find_monitor(display: &gdk::Display, connector: &str) -> Option<gdk::Monitor>
         .iter::<gdk::Monitor>()
         .flatten()
         .find(|monitor| monitor.connector().as_deref() == Some(connector))
+}
+
+fn first_monitor(display: &gdk::Display) -> Option<gdk::Monitor> {
+    display.monitors().iter::<gdk::Monitor>().flatten().next()
+}
+
+fn monitor_width(monitor: &gdk::Monitor) -> i32 {
+    monitor.geometry().width()
+}
+
+/// The widest the bar may be: the focused monitor's width less both margins, or the
+/// first monitor's when the focused one was not found, so the trim always has a bound.
+fn max_bar_width(focused: Option<i32>, first: Option<i32>) -> i32 {
+    focused
+        .or(first)
+        .map_or(i32::MAX, |width| width - 2 * EDGE_MARGIN)
 }
 
 /// A window on the overlay layer that takes no keyboard focus and lets clicks through.
@@ -201,6 +250,15 @@ mod tests {
 
     const KEY_LEFTCTRL: u32 = 29;
     const KEY_A: u32 = 30;
+
+    #[test]
+    fn unfound_monitor_is_bounded_by_the_first_monitor() {
+        assert_eq!(max_bar_width(None, Some(1920)), 1920 - 2 * EDGE_MARGIN);
+        assert_eq!(
+            max_bar_width(Some(2560), Some(1920)),
+            2560 - 2 * EDGE_MARGIN
+        );
+    }
 
     fn key(code: u32) -> KeyId {
         KeyId {

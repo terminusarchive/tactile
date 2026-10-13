@@ -1,9 +1,9 @@
 use std::fmt;
 use std::fs;
 use std::path::Path;
-use std::sync::mpsc::Sender;
 use std::thread;
 
+use async_channel::{SendError, Sender};
 use evdev::{AttributeSetRef, Device, EventType, InputEvent as RawEvent, KeyCode};
 
 use crate::bar::{KeyId, KeyboardId};
@@ -71,16 +71,22 @@ fn is_keyboard(keys: &AttributeSetRef<KeyCode>) -> bool {
 /// Runs until the device cannot be read (unplugged), then reports the keyboard gone.
 fn read_keys(mut device: Device, keyboard: KeyboardId, sender: Sender<InputEvent>) {
     while let Ok(events) = device.fetch_events() {
-        for event in events {
-            let Some(event) = key_event(keyboard, &event) else {
-                continue;
-            };
-            if sender.send(event).is_err() {
-                return;
-            }
+        if forward_keys(events, keyboard, &sender).is_err() {
+            return;
         }
     }
-    let _ = sender.send(InputEvent::Gone(keyboard));
+    let _ = sender.send_blocking(InputEvent::Gone(keyboard));
+}
+
+/// Sends the key events among `events`; fails once the main loop has gone.
+fn forward_keys(
+    events: impl Iterator<Item = RawEvent>,
+    keyboard: KeyboardId,
+    sender: &Sender<InputEvent>,
+) -> Result<(), SendError<InputEvent>> {
+    events
+        .filter_map(|event| key_event(keyboard, &event))
+        .try_for_each(|event| sender.send_blocking(event))
 }
 
 /// Key down and key up only: other event types and kernel auto-repeat are dropped.
@@ -101,8 +107,6 @@ fn key_event(keyboard: KeyboardId, event: &RawEvent) -> Option<InputEvent> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::mpsc::channel;
-
     use evdev::AttributeSet;
 
     use super::*;
@@ -123,14 +127,14 @@ mod tests {
 
     #[test]
     fn no_device_in_directory_is_an_error_naming_the_input_group() {
-        let (sender, _receiver) = channel();
+        let (sender, _receiver) = async_channel::unbounded();
         let error = start(&temp_dir("empty"), sender).unwrap_err();
         assert!(error.to_string().contains("`input` group"));
     }
 
     #[test]
     fn missing_directory_is_an_error_naming_the_input_group() {
-        let (sender, _receiver) = channel();
+        let (sender, _receiver) = async_channel::unbounded();
         let error = start(Path::new("/nonexistent/tactile-input"), sender).unwrap_err();
         assert!(error.to_string().contains("`input` group"));
     }
@@ -139,7 +143,7 @@ mod tests {
     fn event_file_that_is_not_a_device_is_not_a_keyboard() {
         let dir = temp_dir("not-a-device");
         fs::write(dir.join("event0"), "").unwrap();
-        let (sender, _receiver) = channel();
+        let (sender, _receiver) = async_channel::unbounded();
         assert!(start(&dir, sender).is_err());
     }
 
