@@ -69,9 +69,8 @@ cp assets/tactile.desktop ~/.local/share/applications/
 cp assets/tactile.svg ~/.local/share/icons/hicolor/scalable/apps/
 ```
 
-Activating the entry starts the overlay; activating it again stops it. The entry runs
-`tactile` by name, so it needs `tactile` on the PATH your session gives graphical
-apps; cargo installs it to `~/.cargo/bin`.
+Activating the entry starts the overlay; activating it again stops it. The entry looks
+for `tactile` in `~/.cargo/bin` as well as on your PATH.
 
 ## Licence
 
