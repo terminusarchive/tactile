@@ -10,7 +10,7 @@ use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 
 use crate::args::Position;
 use crate::bar::{Bar, Cap, IDLE_LIMIT};
-use crate::hyprland;
+use crate::compositor::Compositor;
 use crate::input::InputEvent;
 use crate::keymap::Keymap;
 
@@ -97,15 +97,16 @@ pub fn run(
     position: Position,
     events: Receiver<InputEvent>,
     keymap: Keymap,
+    compositor: Compositor,
 ) -> glib::ExitCode {
     let app = gtk4::Application::builder()
         .application_id("dev.tactile.overlay")
         .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
         .build();
-    let state = RefCell::new(Some((events, keymap)));
+    let state = RefCell::new(Some((events, keymap, compositor)));
     app.connect_activate(move |app| {
-        if let Some((events, keymap)) = state.borrow_mut().take() {
-            show(app, &monitor_name, position, events, keymap);
+        if let Some((events, keymap, compositor)) = state.borrow_mut().take() {
+            show(app, &monitor_name, position, events, keymap, compositor);
         }
     });
     app.run_with_args::<&str>(&[])
@@ -117,6 +118,7 @@ fn show(
     position: Position,
     events: Receiver<InputEvent>,
     keymap: Keymap,
+    compositor: Compositor,
 ) {
     let display = gdk::Display::default().expect("GTK opened a display");
     gtk4::style_context_add_provider_for_display(
@@ -138,6 +140,7 @@ fn show(
         row,
         bar: Bar::default(),
         keymap,
+        compositor,
         max_width,
         idle_timer: None,
     }));
@@ -154,6 +157,7 @@ struct Overlay {
     row: gtk4::Box,
     bar: Bar,
     keymap: Keymap,
+    compositor: Compositor,
     max_width: i32,
     idle_timer: Option<glib::SourceId>,
 }
@@ -168,7 +172,7 @@ fn handle_event(overlay: &Rc<RefCell<Overlay>>, event: InputEvent) {
         &mut this.bar,
         event,
         Instant::now(),
-        hyprland::locked,
+        || this.compositor.locked(),
     );
     redraw(&this.window, &this.row, &mut this.bar, this.max_width);
     if let Some(timer) = this.idle_timer.take() {

@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- tachyon is supported beside Hyprland: tactile picks the compositor whose socket is
+  present and reads the layout, the focused monitor and the session lock from it.
+
 ## [0.1.1] - 2026-10-13
 
 ### Security
