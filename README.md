@@ -1,11 +1,13 @@
 # tactile
 
-An on-screen overlay of the keys you press, for Hyprland. Run one command and every
+An on-screen overlay of the keys you press, for tachyon and Hyprland. Run one command and every
 key appears as a cap on a translucent bar, which is handy for screencasts and demos.
 
 ## Requirements
 
-- Hyprland.
+- tachyon or Hyprland. tactile uses tachyon when its socket is present, and Hyprland when
+  `HYPRLAND_INSTANCE_SIGNATURE` is set. On tachyon it asks `core.keyboard` for the layout,
+  which needs a tachyon that has it; an older tachyon gets libxkbcommon's default layout.
 - GTK4, gtk4-layer-shell and libxkbcommon. On Arch: `gtk4`, `gtk4-layer-shell`,
   `libxkbcommon`.
 - To build with `cargo install`: Rust 1.92 or newer, pkg-config, and the development
@@ -62,6 +64,16 @@ To toggle it with a key in `hyprland.lua`:
 ```lua
 hl.bind("SUPER + K", hl.dsp.exec_cmd("pkill -x -u $(id -u) tactile || { PATH=$HOME/.cargo/bin:$PATH; exec tactile; }"))
 ```
+
+On tachyon, bind it in `binds.toml`:
+
+```toml
+"$mod+k" = "core.spawn tactile"
+```
+
+That starts tactile; stop it with `pkill -x -u $(id -u) tactile`. Bind that command too
+(for example `"$mod+shift+k" = "core.spawn pkill -x -u $(id -u) tactile"`) if you want a
+key for it.
 
 ## What it shows
 
